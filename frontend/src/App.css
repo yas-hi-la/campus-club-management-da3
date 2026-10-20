@@ -648,3 +648,45 @@ body {
 .modal-confirm:hover {
   background-color: #b91c1c;
 }
+
+.graph-container {
+  background-color: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: #52525b;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.register-select {
+  margin-top: 0.4rem;
+  width: 100%;
+  background-color: #ffffff;
+  border: 1px solid #bbf7d0;
+  color: #18181b;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+}

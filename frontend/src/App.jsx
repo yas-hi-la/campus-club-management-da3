@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
+import ForceGraph2D from 'react-force-graph-2d';
 import './App.css';
 import {
   GraduationCap, Users, Calendar, Landmark, Search, Trash2,
-  Sparkles, Laptop, MessageCircle, Palette, Leaf, Flag, MapPin
+  Sparkles, Laptop, MessageCircle, Palette, Leaf, Flag, MapPin, Network
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:5050/api';
@@ -67,6 +68,9 @@ function App() {
             <span className="sidebar-link-label"><Calendar size={16} /> Events</span>
             <span className="sidebar-count">{String(counts.events).padStart(2, '0')}</span>
           </button>
+          <button className={`sidebar-link ${tab === 'graph' ? 'active' : ''}`} onClick={() => setTab('graph')}>
+            <span className="sidebar-link-label"><Network size={16} /> Graph View</span>
+          </button>
         </nav>
 
         <div className="sidebar-promo">
@@ -85,7 +89,99 @@ function App() {
         {tab === 'clubs' && <ClubsView count={counts.clubs} />}
         {tab === 'students' && <StudentsView count={counts.students} />}
         {tab === 'events' && <EventsView count={counts.events} />}
+        {tab === 'graph' && <GraphView />}
       </main>
+    </div>
+  );
+}
+
+// ===== GRAPH VIEW =====
+
+function GraphView() {
+  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/graph`)
+      .then((res) => res.json())
+      .then((data) => {
+        setGraphData(data);
+        setLoading(false);
+      });
+  }, []);
+
+  const colorMap = {
+    Club: '#6366f1',
+    Student: '#22c55e',
+    Event: '#f59e0b',
+    Venue: '#06b6d4',
+    FacultyAdvisor: '#a855f7',
+    ClubBudget: '#f43f5e',
+    SponsorCompany: '#eab308',
+    EquipmentAsset: '#78716c',
+    EventDetails: '#64748b',
+  };
+
+  if (loading) return <p className="loading-text">Loading graph...</p>;
+
+  return (
+    <div>
+      <div className="section-header">
+        <div>
+          <h2 className="section-title">Graph View</h2>
+          <p className="section-hint">
+            Live visualization of {graphData.nodes.length} nodes and {graphData.links.length} relationships from Neo4j
+          </p>
+        </div>
+      </div>
+
+      <div className="graph-container">
+        <ForceGraph2D
+          graphData={graphData}
+          nodeLabel={(node) => `${node.label}: ${node.name}`}
+          nodeRelSize={6}
+          linkLabel={(link) => link.type}
+          linkDirectionalArrowLength={4}
+          linkDirectionalArrowRelPos={1}
+          linkColor={() => '#d4d4d8'}
+          width={820}
+          height={520}
+          nodeCanvasObject={(node, ctx, globalScale) => {
+            const color = colorMap[node.label] || '#999';
+            const radius = 6;
+
+            // Draw the circle
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            // Draw the label text below the circle
+            const label = node.name;
+            const fontSize = 11 / globalScale;
+            ctx.font = `${fontSize}px Sans-Serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = '#18181b';
+            ctx.fillText(label, node.x, node.y + radius + 2);
+          }}
+          nodePointerAreaPaint={(node, color, ctx) => {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, 6, 0, 2 * Math.PI, false);
+            ctx.fill();
+          }}
+        />
+      </div>
+
+      <div className="graph-legend">
+        {Object.entries(colorMap).map(([label, color]) => (
+          <div className="legend-item" key={label}>
+            <span className="legend-dot" style={{ backgroundColor: color }}></span>
+            {label}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -380,6 +476,24 @@ function StudentsView() {
               </div>
             )
           )}
+          <div className="detail-row" style={{ marginTop: '1rem' }}>
+            <strong>Register for a new event:</strong>
+            <select
+              className="register-select"
+              onChange={(e) => {
+                if (e.target.value) handleRegister(e.target.value);
+                e.target.value = '';
+              }}
+              disabled={registering}
+            >
+              <option value="">{registering ? 'Registering...' : 'Select an event'}</option>
+              {events
+                .filter((ev) => !detail.events.includes(ev.title))
+                .map((ev) => (
+                  <option key={ev.event_id} value={ev.event_id}>{ev.title}</option>
+                ))}
+            </select>
+          </div>
         </div>
       )}
 
@@ -392,6 +506,26 @@ function StudentsView() {
       )}
     </div>
   );
+
+  const [events, setEvents] = useState([]);
+  const [registering, setRegistering] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/events`).then((res) => res.json()).then(setEvents);
+  }, []);
+
+  function handleRegister(eventId) {
+    setRegistering(true);
+    fetch(`${API_BASE}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: selectedId, event_id: eventId }),
+    })
+      .then(() => {
+        setRegistering(false);
+        handleSelect(selectedId); // refresh the detail panel
+      });
+  }
 }
 
 function AddStudentForm({ onAdded }) {

@@ -30,7 +30,6 @@ function cleanProperties(props) {
 
 // ===== GET ROUTES =====
 
-// Get all clubs
 app.get('/api/clubs', async (req, res) => {
   const session = driver.session();
   try {
@@ -45,7 +44,6 @@ app.get('/api/clubs', async (req, res) => {
   }
 });
 
-// Get all students
 app.get('/api/students', async (req, res) => {
   const session = driver.session();
   try {
@@ -60,7 +58,6 @@ app.get('/api/students', async (req, res) => {
   }
 });
 
-// Get all events, with their venue and hosting club
 app.get('/api/events', async (req, res) => {
   const session = driver.session();
   try {
@@ -83,7 +80,6 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// Get all venues
 app.get('/api/venues', async (req, res) => {
   const session = driver.session();
   try {
@@ -98,7 +94,6 @@ app.get('/api/venues', async (req, res) => {
   }
 });
 
-// Get a single student's club memberships and event registrations
 app.get('/api/students/:id', async (req, res) => {
   const session = driver.session();
   try {
@@ -127,17 +122,91 @@ app.get('/api/students/:id', async (req, res) => {
   }
 });
 
-// ===== POST ROUTES (create new data) =====
+// Get full graph data (nodes + relationships) for visualization
+app.get('/api/graph', async (req, res) => {
+  const session = driver.session();
+  try {
+    const result = await session.run(`
+      MATCH (n)-[r]->(m)
+      RETURN n, r, m
+      LIMIT 100
+    `);
 
-// Add a new club
+    const nodesMap = new Map();
+    const links = [];
+
+    result.records.forEach((record) => {
+      const n = record.get('n');
+      const m = record.get('m');
+      const r = record.get('r');
+
+      [n, m].forEach((node) => {
+        const id = node.identity.toString();
+        if (!nodesMap.has(id)) {
+          const label = node.labels[0];
+          const nameField = (node.properties.first_name)
+            ? `${node.properties.first_name || ''} ${node.properties.last_name || ''}`.trim()
+            : node.properties.title || node.properties.club_name || node.properties.building_name
+            || node.properties.company_name || node.properties.item_name
+            || node.properties.advisor_name || label;
+          nodesMap.set(id, { id, label, name: nameField });
+        }
+      });
+
+      links.push({
+        source: n.identity.toString(),
+        target: m.identity.toString(),
+        type: r.type,
+      });
+    });
+
+    res.json({ nodes: Array.from(nodesMap.values()), links });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ===== POST ROUTES (create new data) =====
+// Register a student for an event
+app.post('/api/register', async (req, res) => {
+  const session = driver.session();
+  try {
+    const { student_id, event_id, attendance_status } = req.body;
+
+    const result = await session.run(
+      `MATCH (s:Student {student_id: $studentId}), (e:Event {event_id: $eventId})
+       MERGE (s)-[r:REGISTERED_FOR]->(e)
+       ON CREATE SET r.attendance_status = $attendanceStatus
+       RETURN s, e`,
+      {
+        studentId: parseInt(student_id),
+        eventId: parseInt(event_id),
+        attendanceStatus: attendance_status || 'Registered'
+      }
+    );
+
+    if (result.records.length === 0) {
+      return res.status(400).json({ error: 'Invalid student_id or event_id' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  } finally {
+    await session.close();
+  }
+});
 app.post('/api/clubs', async (req, res) => {
+  // Register a student for an event
+
   const session = driver.session();
   try {
     const { club_name, category, founded_date } = req.body;
-
     const idResult = await session.run('MATCH (c:Club) RETURN max(c.club_id) AS maxId');
     const nextId = (idResult.records[0].get('maxId')?.toNumber() || 0) + 1;
-
     const result = await session.run(
       `CREATE (c:Club {club_id: $clubId, club_name: $clubName, category: $category, founded_date: date($foundedDate)})
        RETURN c`,
@@ -152,15 +221,12 @@ app.post('/api/clubs', async (req, res) => {
   }
 });
 
-// Add a new student
 app.post('/api/students', async (req, res) => {
   const session = driver.session();
   try {
     const { first_name, last_name, email, phone, department, academic_year } = req.body;
-
     const idResult = await session.run('MATCH (s:Student) RETURN max(s.student_id) AS maxId');
     const nextId = (idResult.records[0].get('maxId')?.toNumber() || 0) + 1;
-
     const result = await session.run(
       `CREATE (s:Student {student_id: $studentId, first_name: $firstName, last_name: $lastName,
                email: $email, phone: $phone, department: $department, academic_year: $academicYear})
@@ -184,15 +250,12 @@ app.post('/api/students', async (req, res) => {
   }
 });
 
-// Add a new event (linked to an existing club and venue)
 app.post('/api/events', async (req, res) => {
   const session = driver.session();
   try {
     const { title, event_type, event_date, start_time, end_time, event_budget, club_id, venue_id } = req.body;
-
     const idResult = await session.run('MATCH (e:Event) RETURN max(e.event_id) AS maxId');
     const nextId = (idResult.records[0].get('maxId')?.toNumber() || 0) + 1;
-
     const result = await session.run(
       `MATCH (c:Club {club_id: $clubId}), (v:Venue {venue_id: $venueId})
        CREATE (e:Event {event_id: $eventId, title: $title, event_type: $eventType,
@@ -217,6 +280,50 @@ app.post('/api/events', async (req, res) => {
       return res.status(400).json({ error: 'Invalid club_id or venue_id' });
     }
     res.json(cleanProperties(result.records[0].get('e').properties));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ===== DELETE ROUTES =====
+
+app.delete('/api/clubs/:id', async (req, res) => {
+  const session = driver.session();
+  try {
+    const clubId = parseInt(req.params.id);
+    await session.run('MATCH (c:Club {club_id: $clubId}) DETACH DELETE c', { clubId });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  } finally {
+    await session.close();
+  }
+});
+
+app.delete('/api/students/:id', async (req, res) => {
+  const session = driver.session();
+  try {
+    const studentId = parseInt(req.params.id);
+    await session.run('MATCH (s:Student {student_id: $studentId}) DETACH DELETE s', { studentId });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  } finally {
+    await session.close();
+  }
+});
+
+app.delete('/api/events/:id', async (req, res) => {
+  const session = driver.session();
+  try {
+    const eventId = parseInt(req.params.id);
+    await session.run('MATCH (e:Event {event_id: $eventId}) DETACH DELETE e', { eventId });
+    res.json({ success: true });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Something went wrong' });
